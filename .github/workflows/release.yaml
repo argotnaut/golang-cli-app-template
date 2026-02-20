@@ -1,0 +1,61 @@
+name: release
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+          token: ${{secrets.RELEASE_TOKEN}}
+      -
+        name: Set up Go
+        uses: actions/setup-go@v5
+      -
+        name: Semantic version
+        uses: paulhatch/semantic-version@v6.0.0
+        id: determine-version
+        with:
+          tag_prefix: ""
+      -
+        name: Get version
+        run: |
+          # Get semantic version from previous step
+          export SEMANTIC_VERSION="${{ steps.determine-version.outputs.version }}"          
+          echo "Semantic version number is $SEMANTIC_VERSION"
+
+          # Replace the old version with the new version in root.go
+          sed -i 's/^\(const VERSION =\).*/\1 '\""$SEMANTIC_VERSION"\"'/' cmd/root.go
+ 
+          if [[ $(git diff --exit-code | head -c1 | wc -c) -ne 0 ]]; then
+            echo "Updated root.go version line to: $(cat cmd/root.go | grep VERSION)"
+            git config --global user.name 'releaser'
+            git config --global user.email '161991025+argotnaut@users.noreply.github.com'
+            git commit -a -m "Updating version number from release workflow"
+            git push --force
+
+            # Create the tag for the new version
+            git tag -f "$SEMANTIC_VERSION"
+            git push --tags --force
+          else
+            echo "No changes to root.go necessary"
+          fi
+      -
+        name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          distribution: goreleaser
+          args: release --clean
